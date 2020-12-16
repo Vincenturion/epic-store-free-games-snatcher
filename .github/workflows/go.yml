@@ -1,0 +1,50 @@
+name: Go
+
+on:
+  schedule:
+  - cron: '0 1/12 * * *'
+  watch:
+    types: [started]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download & Install Chrome
+      run: sudo apt update && sudo apt install -y google-chrome-stable
+
+    - name: Set up Go 1.x
+      uses: actions/setup-go@v2
+      with:
+        go-version: ^1.15.2
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+      
+    - name: Get dependencies
+      run: |
+        go get -v -t -d ./...
+        if [ -f Gopkg.toml ]; then
+            curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+            dep ensure
+        fi
+        
+    - name: Where are we?
+      run: pwd && ls -lrth
+
+    - name: Build
+      run: go build -o games-yeeter-2000 -v ./... 
+
+    - name: "Configuring config.yaml"
+      run: |
+        mv config.yaml.example config.yaml
+        sed -i '/FOR_EXAMPLE/d' config.yaml
+        sed -i 's|<hCAPTCHA_ACCESSIBILITY_URL>|${{ secrets.hCaptchaURL }}|' config.yaml
+        sed -i 's|<EPIC_GAMES_STORE_USERNAME>|${{ secrets.username }}|' config.yaml
+        sed -i 's|<EPIC_GAMES_STORE_PASSWORD>|${{ secrets.password }}|' config.yaml
+    
+    - name: Run with XVFB
+      uses: GabrielBB/xvfb-action@v1.4
+      with:
+        run: ./games-yeeter-2000

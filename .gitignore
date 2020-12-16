@@ -6,6 +6,8 @@
 *.dylib
 config.yaml
 games_yeeter_2000*
+game_snatcher*
+%LOCALAPPDATA%
 # Test binary, built with `go test -c`
 *.test
 
