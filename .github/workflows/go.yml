@@ -3,6 +3,8 @@ name: Go
 on:
   schedule:
   - cron: '0 1/12 * * *'
+  watch:
+    types: [started]
 
 jobs:
   build:

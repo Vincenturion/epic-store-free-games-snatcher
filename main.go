@@ -17,8 +17,8 @@ import (
 
 var config Config
 
-func doSlowCall(c context.Context, a chromedp.QueryAction) error {
-	ctx, cancel := context.WithTimeout(c, time.Second*2)
+func doSlowCall(c context.Context, a chromedp.QueryAction, seconds time.Duration) error {
+	ctx, cancel := context.WithTimeout(c, time.Second*seconds)
 	defer cancel()
 	err := a.Do(ctx)
 	return err
@@ -30,39 +30,51 @@ func handleFreeGames(c context.Context, urls []string) {
 	for _, url := range urls {
 		fmt.Printf("Checking URL: %s\n", url)
 		chromedp.Navigate(url).Do(c)
-		doSlowCall(c, chromedp.WaitVisible(`//button[text()[contains(.,"Continue")]]`))
-		doSlowCall(c, chromedp.Click(`//button[text()[contains(.,"Continue")]]`))
+		if err := doSlowCall(c, chromedp.WaitEnabled(`//button[text()[contains(.,"Continue")]]`), 5); err == nil {
+			doSlowCall(c, chromedp.Click(`//button[text()[contains(.,"Continue")]]`), 5)
+		}
 		fmt.Println("Checking if already owned.")
-		// doSlowCall(c, chromedp.WaitVisible(`//button[./span[text()[contains(.,"Owned")]]]`))
-		err := doSlowCall(c, chromedp.QueryAfter(`//button[./span[text()[contains(.,"Owned")]]]`, func(a context.Context, b runtime.ExecutionContextID, nodes ...*cdp.Node) error {
-			return errors.New("already owned")
-		}))
-		if err != nil && err.Error() == "already owned" {
-			chromedp.NavigateBack().Do(c)
-			fmt.Println("Already owned, continuing.")
+		if err := doSlowCall(c, chromedp.WaitVisible(`//button[./span[text()[contains(.,"Owned")]]]`), 1); err == nil {
+			fmt.Println("Already owned. Skipping.")
 			continue
 		}
 		fmt.Println("Waiting for GET button")
-		if err := doSlowCall(c, chromedp.WaitEnabled(`//button[@data-testid="purchase-cta-button"]`)); err == nil {
+		if err := doSlowCall(c, chromedp.WaitEnabled(`//button[@data-testid="purchase-cta-button"]`), 5); err == nil {
 			fmt.Println("Clicking GET button")
+			chromedp.Sleep(time.Second).Do(c)
 			chromedp.Click(`//button[@data-testid="purchase-cta-button"]`).Do(c)
+		} else {
+			fmt.Println("Could not find the GET button. Skipping.")
+			continue
 		}
 		fmt.Println("Waiting for checkbox")
-		if err := doSlowCall(c, chromedp.WaitEnabled(`//i[@class="icon-checkbox-unchecked radio-unchecked"]`)); err == nil {
+		if err := doSlowCall(c, chromedp.WaitEnabled(`//i[@class="icon-checkbox-unchecked radio-unchecked"]`), 5); err == nil {
 			fmt.Println("Clicking checkbox")
+			chromedp.Sleep(time.Second).Do(c)
 			chromedp.Click(`//i[@class="icon-checkbox-unchecked radio-unchecked"]`).Do(c)
+		} else {
+			fmt.Println("Could not find the Checkbox. Skipping.")
+			continue
 		}
 		fmt.Println("Waiting for Place Order")
-		if err := doSlowCall(c, chromedp.WaitEnabled(`//button[./span[text()[contains(.,"Place Order")]]]`)); err == nil {
+		if err := doSlowCall(c, chromedp.WaitEnabled(`//button[./span[text()[contains(.,"Place Order")]]]`), 5); err == nil {
 			fmt.Println("Clicking Place Order")
+			chromedp.Sleep(time.Second).Do(c)
 			chromedp.Click(`//button[./span[text()[contains(.,"Place Order")]]]`).Do(c)
+		} else {
+			fmt.Println("Could not find the Place Order button. Skipping.")
+			continue
 		}
 		fmt.Println("Waiting for Agreement")
-		if err := doSlowCall(c, chromedp.WaitEnabled(`//button[span[text()="I Agree"]]`)); err == nil {
+		if err := doSlowCall(c, chromedp.WaitEnabled(`//button[span[text()="I Agree"]]`), 5); err == nil {
 			fmt.Println("Clicking I Agree")
+			chromedp.Sleep(time.Second).Do(c)
 			chromedp.Click(`//button[span[text()="I Agree"]]`).Do(c)
+		} else {
+			fmt.Println("Could not find the 'I Agree' button. Skipping.")
+			continue
 		}
-		doSlowCall(c, chromedp.WaitEnabled(`//span[text()="Thank you for buying"]`))
+		doSlowCall(c, chromedp.WaitEnabled(`//span[text()="Thank you for buying"]`), 5)
 	}
 }
 
@@ -85,11 +97,12 @@ func getFreeGameURLs(ctx context.Context) (urls []string) {
 }
 
 func getAccessibilityCookie(ctx context.Context) {
-	tries := 2
+	tries := 5
 	for _, link := range config.HCaptchaURLs {
 		chromedp.Navigate(link).Do(ctx)
 		chromedp.WaitEnabled(`//button[@data-cy='setAccessibilityCookie']`).Do(ctx)
 		for i := 0; i < tries; i++ {
+			fmt.Printf("Trying to get hCaptcha accessibility cookie... %d of %d\n", i+1, tries)
 			chromedp.Sleep(time.Millisecond * time.Duration(rand.Intn(2500)+2500)).Do(ctx)
 			chromedp.Click(`//button[@data-cy='setAccessibilityCookie']`).Do(ctx)
 			chromedp.Sleep(time.Millisecond * time.Duration(rand.Intn(2500)+2500)).Do(ctx)
@@ -103,6 +116,8 @@ func getAccessibilityCookie(ctx context.Context) {
 }
 
 func getEpicStoreCookie(ctx context.Context) {
+	fmt.Println("Logging into Epic Games Store.")
+	tries := 5
 	chromedp.Run(ctx,
 		chromedp.Navigate(`https://www.epicgames.com/login`),
 		chromedp.WaitEnabled(`//div[@id='login-with-epic']`),
@@ -111,15 +126,19 @@ func getEpicStoreCookie(ctx context.Context) {
 		chromedp.SendKeys(`//input[@id='email']`, config.Username),
 		chromedp.WaitEnabled(`//input[@id='password']`),
 		chromedp.SendKeys(`//input[@id='password']`, config.Password),
-		chromedp.WaitEnabled(`//button[@id='sign-in']`),
-		chromedp.Click(`//button[@id='sign-in']`),
 	)
-	chromedp.Sleep(time.Millisecond * time.Duration(rand.Intn(2500)+2500)).Do(ctx)
-	if _, epicStoreCookie := checkCookies(ctx); !epicStoreCookie {
-		log.Fatal("Apparently logging in is not successful. Too bad :(.")
-	} else {
-		fmt.Println("Logged into Epic Games Store.")
+	for i := 0; i < tries; i++ {
+		fmt.Printf("Trying to log in to Epic Games Store... %d of %d\n", i+1, tries)
+		if err := doSlowCall(ctx, chromedp.WaitEnabled(`//button[@id='sign-in']`), 5); err == nil {
+			doSlowCall(ctx, chromedp.Click(`//button[@id='sign-in']`), 2)
+		}
+		chromedp.Sleep(time.Second).Do(ctx)
+		if _, epicStoreCookie := checkCookies(ctx); epicStoreCookie {
+			fmt.Println("Logged into Epic Games Store.")
+			return
+		}
 	}
+	log.Fatal("Apparently, logging in is not successful. Too bad.")
 }
 
 func checkCookies(ctx context.Context) (accessibilityCookie bool, epicCookie bool) {
@@ -151,6 +170,34 @@ func getCookies(ctx context.Context) {
 	getEpicStoreCookie(ctx)
 }
 
+func setupLogger(ctx context.Context) {
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		go func() {
+			if e, ok := ev.(*runtime.EventConsoleAPICalled); ok {
+				for _, arg := range e.Args {
+					if e.Type == runtime.APITypeError && arg.Type != runtime.TypeUndefined {
+						fmt.Printf("%s\n", arg.Value)
+					}
+				}
+			}
+		}()
+	})
+}
+
+func setCookies(ctx context.Context) {
+	fmt.Println("Setting cookies.")
+	expiryTime := cdp.TimeSinceEpoch(time.Now().Add(time.Hour))
+	cookies := []*network.CookieParam{
+		{
+			Name:    "OptanonAlertBoxClosed",
+			Value:   "en-US",
+			URL:     "epicgames.com",
+			Expires: &expiryTime,
+		},
+	}
+	network.SetCookies(cookies).Do(ctx)
+}
+
 func main() {
 	config = readConfig()
 	dir, err := ioutil.TempDir("", "free-game-fetcher-2000")
@@ -174,7 +221,9 @@ func main() {
 	}
 	if err := chromedp.Run(taskCtx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			setupLogger(ctx)
 			getCookies(ctx)
+			setCookies(ctx)
 			handleFreeGames(ctx, getFreeGameURLs(ctx))
 			fmt.Println("Done!")
 			return nil
